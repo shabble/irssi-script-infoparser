@@ -18,8 +18,7 @@ use Data::Dumper;
 
 =head1 NAME
 
-Irssi::Script::InfoParser - Extract information from the C<$VERSION> and
-C<%IRSSI> headers of an Irssi script.
+Irssi::Script::InfoParser - Extract information from the C<$VERSION> and C<%IRSSI> headers of an Irssi script.
 
 =head1 DESCRIPTION
 
