@@ -1,13 +1,35 @@
 set-1:
     001-vars-only-authors.pl:
         authors: 'test'
-    002-vars-complete.pl:
-        authors:     'Mr. Test1, Mr test2'
+    002-vars-multiauthor-nosplit.pl:
+        authors: 'Mr. Test1, Mr. test2'
+        url:     'https://example.com/example'
+    003-quoted-keys.pl:
+        name:    'thingy'
+        authors: 'test'
+    004-all-commas.pl:
+        name:    'thingy'
+        authors: 'test'
+    005-vars-complete.pl:
+        authors:     'Mr. Test1, Mr. test2'
         contact:     'foo@example.com'
         name:        'test'
         description: 'some description.'
         license:     'GPL v2'
         url:         'https://example.com/example'
-
-        
-           
+set-2:
+    001-our-complete.pl:
+        authors:     
+            - 'Mr. Test1'
+            - 'Mr. test2'
+        contact:     'foo@example.com'
+        name:        'test'
+        description: 'some description.'
+        license:     'GPL v2'
+        url:         'https://example.com/example'
+    002-authors-single-split.pl:
+        authors: [ 'Mr. Test1' ]
+    003-authors-multiple-split.pl:
+        authors:
+            - 'Mr. Test1'
+            - 'Mr. test2'

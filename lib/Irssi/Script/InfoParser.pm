@@ -59,6 +59,14 @@ has 'version'
       default => 'cake',
      );
 
+has 'split_authors'
+  => (
+      is       => 'ro',
+      isa      => 'Bool',
+      required => 1,
+      default  => 0,
+     );
+
 sub _load_ppi_doc {
     my ($self) = @_;
     my $file = $self->file;
@@ -341,6 +349,7 @@ sub is_quoted_content {
     if ($token->class =~ m/^PPI::Token::Quote::(Double|Single)/) {
         my $type = ($1 eq 'Double') ? '"' : "'";
         my $content = $token->content;
+        # remove quotes.
         $content =~ s/^$type//; $content =~ s/$type$//;
         _trace("is_quoted_content(): Content '$content'");
         return $content;
@@ -362,8 +371,8 @@ sub is_VERSION_start_symbol {
 }
 
 sub is_valid_info_hashkey {
-    my ($self, $token) = @_;
-    return $self->_is_keyword($token->content);
+    my ($self, $key) = @_;
+    return $self->_is_keyword($key);
 }
 
 sub process_irssi_buffer {
@@ -380,8 +389,10 @@ sub process_irssi_buffer {
 
     my ($key, $value);
     my $concat_next = 0;
-    my $z;
+    my $key_quoted  = 0;
+    my $concat_buf;
 
+  PARSE:
     while (my $token = shift(@$buffer)) {
         _info("Token: " . $token->class . " Content: " . $token->content);
         #_info("** Mode: $state, intro: $intro, $key => $value ");
@@ -393,14 +404,14 @@ sub process_irssi_buffer {
                     if (is_IRSSI_start_symbol($token)) {
                         $preamble = 1;
                         _debug("Seen Start, Setting preamble to 1");
-                        next;
+                        next PARSE;
                     }
                 }
                 when (1) {
                     if (is_assign($token)) {
                         $preamble = 2;
                         _debug("Seen Assign, Setting preamble to 2");
-                        next;
+                        next PARSE;
                     }
                 }
                 when (2) {
@@ -408,50 +419,58 @@ sub process_irssi_buffer {
                         $preamble = 3;
                         _debug("Seen Structure Start, Setting premable to 3");
 
-                        next;
+                        next PARSE;
                     }
                 }
             }
         }
         _trace('past preamble');
 
-        # _info("Token: " . $token->class . " Content: " . $token->content);
-        # _info("** Mode: $state, intro: $intro, $key => $value ");
-
         # TODO:
         # need to check if anyone has quoted their first words, or
         # used commas rather than fat-arrows for key/val separation.
         given ($state) {
             when (0) {
-                if (is_unquoted_word($token) and
-                    $self->is_valid_info_hashkey($token)) {
-                    $key = $token->content;
+                my $tmp;
+                if ($tmp = is_unquoted_word($token)) {
+                    $key_quoted = 0;
+                } elsif ($tmp = is_quoted_content($token)) {
+                    $key_quoted = 1;
+                }
 
-                    _debug("Word content is good, key=$key. Mode set to 1");
+                if ($tmp and $self->is_valid_info_hashkey($tmp)) {
+                    $key = $tmp;
+                    _debug("Word ok, key=$key. Mode set to 1");
                     $state = 1;
-                    next;
+                    next PARSE;
+                } else {
+                    $tmp ||= '';
+                    _warn("parse failure, '$tmp' not a valid key");
+                    last PARSE;
                 }
             }
             when (1) {
 
-                if (is_fat_arrow($token)) {
-                    _debug("Mode 1 -> 2, Fat Arrow Delim");
+                if ((is_fat_arrow($token)) or
+                    ($key_quoted == 1 and is_comma($token))) {
+
+                    _debug("Mode 1 -> 2, Fat Arrow Delim (or comma)");
                     $state = 2;
-                    next;
+                    next PARSE;
                 }
             }
             when (2) {
 
-                if ($z = is_quoted_content($token)) {
+                if ($concat_buf = is_quoted_content($token)) {
                     _debug("Mode 2 -> 3, Read quoted content");
                     if ($concat_next) {
-                        $value = $value . $z;
+                        $value = $value . $concat_buf;
                         $concat_next = 0;
                     } else {
-                        $value = $z;
+                        $value = $concat_buf;
                     }
                     $state = 3;
-                    next;
+                    next PARSE;
                 }
             }
             when (3) {
@@ -459,16 +478,17 @@ sub process_irssi_buffer {
                     $concat_next = 1;
                     $state = 2;
                     _debug("Concat pending");
-                    next;
+                    next PARSE;
                 }
 
-                if ((is_comma($token) or is_structure_end($token))) {
+                if (is_comma($token) or is_structure_end($token)) {
                     _debug("Mode 3, read comma, saving $key => $value");
 
                     $hash->{$key} = $value;
-                    $key = undef; $value = undef;
+                    $key = '';
+                    $value = '';
                     $state = 0;
-                    next;
+                    next PARSE;
                 }
             }
             default {
@@ -476,13 +496,39 @@ sub process_irssi_buffer {
                     _warn("Something went wrong. " .
                           "Incomplete parsing: $state/$key/$value");
                 } else {
-                    last;
+                    last PARSE;
                 }
             }
         }
     }
+
+    unless ($state == 0) {
+        _warn("incomplete parsing, left in state: $state");
+        die;
+    }
+
     my $ret = $self->_set_metadata($hash);
+    $self->_postprocess_authors if $self->split_authors;
+
     return scalar(keys %$ret);
+}
+
+sub _postprocess_authors {
+    my ($self) = @_;
+    _trace('_postprocess_authors() called');
+    my $meta = $self->metadata;
+
+    return unless exists $meta->{authors};
+
+    my $authors_str = $meta->{authors};
+    my @authors = split /\s*,\s*/, $authors_str;
+    _trace('authors split into: ' . join(' | ', @authors));
+    if (@authors > 1) {
+        $meta->{authors} = \@authors;
+    } else {
+        $meta->{authors} = [ $authors_str ];
+    }
+    return 1;
 }
 
 
