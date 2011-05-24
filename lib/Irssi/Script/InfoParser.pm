@@ -1,4 +1,5 @@
 package Irssi::Script::InfoParser;
+# ABSTRACT: Extract information from the C<$VERSION> and C<%IRSSI> headers of an Irssi script.
 
 use strict;
 use warnings;
@@ -14,30 +15,15 @@ use PPI::Document;
 use PPI::Dumper;
 use Data::Dumper;
 
-=pod
-
-=head1 NAME
-
-Irssi::Script::InfoParser - Extract information from the C<$VERSION> and C<%IRSSI> headers of an Irssi script.
-
-=head1 DESCRIPTION
-
-TODO
-
-=head1 ATTRIBUTES
-
-=cut
-
 
 has 'file'
   => (
       is       => 'rw',
       isa      => 'Str',
       required => 1,
-      default => '',
      );
 
-has 'ppi_doc'
+has '_ppi_doc'
   => (
       is      => 'rw',
       isa     => 'PPI::Document',
@@ -84,24 +70,11 @@ has 'version'
       default => 'unknown',
      );
 
-=pod
-
-=head1 METHODS
-
-=cut
-
-sub load_new_file {
-    my ($self, $c,  $file) = @_;
-
-    $self->file ($file);
-    $c->log->info("Loading new file: $file");
-    $self->ppi_doc($self->_load_ppi_doc());
-}
-
 sub _load_ppi_doc {
     my ($self) = @_;
     my $file = $self->file;
     my $doc = PPI::Document->new($file, readonly => 1);
+
     if (not defined $doc) {
         die "Exception parsing $file: $!"
     }
@@ -112,11 +85,11 @@ sub _load_ppi_doc {
     return $doc;
 }
 
-sub verify_document {
+sub verify_document_complete {
     my ($self) = @_;
-    my $doc = $self->ppi_doc;
+    my $doc = $self->_ppi_doc;
 
-    return $doc->complete();
+    return $doc->complete;
 }
 
 sub _build_keyword_list {
@@ -131,6 +104,7 @@ sub _build_keyword_list {
 
     my $keyhash = {};
     $keyhash->{$_}++ for (@keywords);
+
     return $keyhash;
 }
 
@@ -138,10 +112,14 @@ sub _build_keyword_list {
 sub parse {
     my ($self) = @_;
 
-    my $doc = $self->ppi_doc;
+    my $doc = $self->_ppi_doc;
+    die "Cannot parse an incomplete document"
+      unless $self->verify_document_complete;
 
     my $VERSION;
     my $IRSSI;
+
+    my $return_value = 0;
 
     $self->probable_versions([]);
 
@@ -179,14 +157,18 @@ sub parse {
                 $start_ver = 1;
                 #say "**Starting version here";
             }
+
             if ($start_ver) {
                 push @ver_buf, $t;
             }
+
             if ($i == $max) {
                 if (scalar @ver_buf) {
                     #   say "Our Version  Buffer Contains: ";
                     #  say join(", ", map { $_->content } @ver_buf);
                     $VERSION = $self->process_version_buffer(@ver_buf);
+                    $return_value = 1 if  $VERSION;
+
                     $VERSION //= 'unknown';
                     $self->_set_version($VERSION);
                 }
@@ -196,10 +178,12 @@ sub parse {
                     #  say join(", ", map { $_->content } @hash_buf);
                     $IRSSI = $self->process_irssi_buffer(@hash_buf);
                     $self->metadata($IRSSI);
+                    $return_value = 1;
                 }
             }
         }
     }
+    return $return_value;
 }
 
 sub process_version_buffer {
@@ -235,7 +219,8 @@ sub process_version_buffer {
     if (scalar(@tmp) != 0) {
         my ($v, $s, $l) = @{$tmp[0]};
 
-        my $version = $v if defined($l) and $l < 50;
+        my $version = '';
+        $version = $v if defined($l) and $l < 50;
 
         $version =~ s/^['"]//;
         $version =~ s/['"]$//;
@@ -303,7 +288,8 @@ sub is_quoted_content {
 
 sub is_IRSSI_start_symbol {
     my ($token) = @_;
-    return (($token->class =~ m/Symbol/) and ($token->content =~ m/\%IRSSI/));
+    return (($token->class =~ m/Symbol/) and
+            ($token->content =~ m/\%IRSSI/));
 }
 
 sub process_irssi_buffer {
@@ -394,21 +380,41 @@ sub process_irssi_buffer {
         }
     }
     return $hash;
+
+
+    sub _trace {
+        if (@_ > 1) {
+            $log->tracef(@_);
+        } else {
+            $log->trace($_[0]);
+        }
+    }
+
+    sub _info {
+        if (@_ > 1) {
+            $log->infof(@_);
+        } else {
+            $log->info($_[0]);
+        }
+    }
+
+    sub _debug {
+        if (@_ > 1) {
+            $log->debugf(@_);
+        } else {
+            $log->debug($_[0]);
+        }
+    }
+
+    sub _warn {
+        if (@_ > 1) {
+            $log->warnf(@_);
+        } else {
+            $log->warn($_[0]);
+        }
+    }
+
 }
-
-
-=pod
-
-=head1 AUTHOR
-
-Tom Feist L<mailto:shabble+irssi@metavore.org>
-
-=head1 LICENSE
-
-This library is free software. You can redistribute it and/or modify
-it under the same terms as Perl itself.
-
-=cut
 
 __PACKAGE__->meta->make_immutable;
 
