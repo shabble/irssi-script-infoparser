@@ -9,3 +9,4 @@ set-3:
     001-vars-concat-str.pl: '2011-05-24-v1.2'
     002-vars-sprintf.pl: '2011-05-24-v1.2'
     003-vars-num-add.pl: '0.201'
+    004-realworld-dau.pl: '2.4.3'

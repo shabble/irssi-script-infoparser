@@ -1,3 +1,4 @@
+#
 set-1:
     001-vars-only-authors.pl:
         authors: 'test'
@@ -17,6 +18,8 @@ set-1:
         description: 'some description.'
         license:     'GPL v2'
         url:         'https://example.com/example'
+
+#
 set-2:
     001-our-complete.pl:
         authors:     
@@ -33,3 +36,10 @@ set-2:
         authors:
             - 'Mr. Test1'
             - 'Mr. test2'
+
+# testing unicode and codepage stuff.
+set-3:
+    001-snowman-utf8.pl:
+        authors: 'The Snowman - ☃'
+    002-author-iso-8859.pl:
+        authors: 'Daniel Kalør (Xnybre)'

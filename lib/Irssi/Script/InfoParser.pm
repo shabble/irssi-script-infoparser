@@ -16,6 +16,40 @@ use PPI::Document;
 use PPI::Dumper;
 use Data::Dumper;
 
+=pod
+
+=head1 SYNOPSIS
+
+    use Irssi::Script::InfoParser;
+
+    my $parser = Irssi::Script::InfoParser->new(file => $script);
+    my $version = $parser->version;
+
+    my @fields = $parser->metadata_fields;
+    my $metadata = $parser->metadata;
+
+    foreach my $name (@fields) {
+        say "Value is $metadata->{$name}!";
+    }
+
+or
+
+    # assuming the authors field is actually defined.
+
+    my $parser = Irssi::Script::InfoParser->new(file => $script,
+                                                split_authors => 0);
+
+    return unless $parser->has_field('authors');
+
+    my $authors_string = $parser->metadata->{authors};
+
+    my $parser = Irssi::Script::InfoParser->new(file => $script,
+                                                split_authors => 1);
+
+    my $authors_arrayref = $parser->metadata->{authors};
+
+=cut
+
 
 has 'file'
   => (
@@ -45,10 +79,16 @@ has '_hash_keywords'
 
 has 'metadata'
   => (
+      traits  => [qw/Hash/],
       is      => 'ro',
       isa     => 'HashRef',
-      default => sub { {} },
+      lazy    => 1,
+      builder => '_build_metadata',
       writer  => '_set_metadata',
+      handles => {
+                  metadata_fields => 'keys',
+                  has_field       => 'exists',
+                 },
      );
 
 has 'version'
@@ -56,7 +96,8 @@ has 'version'
       is      => 'ro',
       isa     => 'Str',
       writer  => '_set_version',
-      default => 'cake',
+      lazy    => 1,
+      builder => '_build_version',
      );
 
 has 'split_authors'
@@ -66,6 +107,34 @@ has 'split_authors'
       required => 1,
       default  => 0,
      );
+
+has '_is_parsed'
+  => (
+      is      => 'rw',
+      isa     => 'Bool',
+      default => 0,
+     );
+
+sub _build_metadata {
+    my $ret = $_[0]->_parse_unless_done;
+    return $ret->{metadata};
+}
+
+sub _build_version {
+    my $ret = $_[0]->_parse_unless_done;
+    return $ret->{version};
+}
+
+sub _parse_unless_done {
+    my ($self) = @_;
+    return if $self->_is_parsed;
+
+    my $ret = $self->parse;
+    die "Parsing document failed" unless $ret;
+
+    return $ret;
+}
+
 
 sub _load_ppi_doc {
     my ($self) = @_;
@@ -113,10 +182,11 @@ sub parse {
     die "Cannot parse an incomplete document"
       unless $self->verify_document_complete;
 
-    my $return_value = 0;
+    my $return_value = { version => 'UNKNOWN',
+                         metadata => {},
+                       };;
     my @ver_buf;
     my @hash_buf;
-
 
     my $statements = $doc->find('PPI::Statement');
     _trace('Found ' . scalar @$statements . ' statements to process');
@@ -167,11 +237,12 @@ sub parse {
             _info("version buffer: '" .
                   join(" _ ", map { $_->content } @ver_buf) . "'");
 
-            my $got_version = $self->process_version_buffer(\@ver_buf);
+            my $version = $self->process_version_buffer(\@ver_buf);
 
-            if ($got_version) {
-                $return_value = 1;
-                _info("*** Version returned: $got_version");
+            if (defined $version) {
+                $self->_set_version($version);
+                $return_value->{version} = $version;
+                _info("*** Version returned: $version");
             } else {
                 _warn("*** version parsing failed");
             }
@@ -182,7 +253,11 @@ sub parse {
             _info("buffer: '" .
                   join(" _ ", map { $_->content } @hash_buf) . "'");
 
-            $return_value = $self->process_irssi_buffer(\@hash_buf);
+            my $meta = $self->process_irssi_buffer(\@hash_buf);
+            if (defined $meta) {
+                $self->_set_metadata($meta);
+                $return_value->{metadata} = $meta;
+            }
             @hash_buf = ();
         }
 
@@ -192,6 +267,8 @@ sub parse {
 
     _info("version set to: " . $self->version);
     _info("parse() complete. Returning $return_value");
+    $self->_is_parsed(1);
+
     return $return_value;
 }
 
@@ -271,13 +348,11 @@ sub process_version_buffer {
         $version =~ s/['"]$//;
 
         _debug("Extracted VERSION: $version");
-        $self->_set_version($version);
-
-        return 1;
+        return $version;
     }
 
     _warn('process_version_buffer(): returning false');
-    return 0;
+    return;
 }
 
 sub is_number {
@@ -506,17 +581,13 @@ sub process_irssi_buffer {
         _warn("incomplete parsing, left in state: $state");
         die;
     }
-
-    my $ret = $self->_set_metadata($hash);
-    $self->_postprocess_authors if $self->split_authors;
-
-    return scalar(keys %$ret);
+    $hash = $self->_postprocess_authors($hash) if $self->split_authors;
+    return $hash;
 }
 
 sub _postprocess_authors {
-    my ($self) = @_;
+    my ($self, $meta) = @_;
     _trace('_postprocess_authors() called');
-    my $meta = $self->metadata;
 
     return unless exists $meta->{authors};
 
@@ -528,7 +599,7 @@ sub _postprocess_authors {
     } else {
         $meta->{authors} = [ $authors_str ];
     }
-    return 1;
+    return $meta;
 }
 
 
