@@ -1,0 +1,10 @@
+set-1:
+    all: 0.3
+set-2:
+    001-vars-str.pl: '200.20.2.01'
+    002-vars-str-singlequote.pl: 'Angry-Armadillo'
+    003-vars-datestamp.pl: '2011-05-24T01:28:10'
+set-3:
+    001-vars-concat-str.pl: '2011-05-24-v1.2'
+    002-vars-sprintf.pl: '2011-05-24-v1.2'
+    003-vars-num-add.pl: '0.201'
