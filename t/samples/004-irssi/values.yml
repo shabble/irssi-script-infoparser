@@ -1,0 +1,13 @@
+set-1:
+    001-vars-only-authors.pl:
+        authors: 'test'
+    002-vars-complete.pl:
+        authors:     'Mr. Test1, Mr test2'
+        contact:     'foo@example.com'
+        name:        'test'
+        description: 'some description.'
+        license:     'GPL v2'
+        url:         'https://example.com/example'
+
+        
+           

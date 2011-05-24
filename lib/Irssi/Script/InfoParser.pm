@@ -83,12 +83,11 @@ sub verify_document_complete {
 
 sub _build_keyword_list {
     my @keywords =
-      ("authors", "contact", "name", "description",
-       "licence", "license", "url", "changed",
-       "original_authors", "original_contact",
-       "commands", "changes", "modules",
-       "sbitems", "contributors", "bugs",
-       "url_ion", "note", "patch",
+      ("authors", "contact", "name", "description", "licence",
+       "license", "changed", "url",  "commands",    "changes",
+       "modules", "sbitems", "bugs", "url_ion",     "note",
+       "patch",   "original_authors","original_contact",
+       "contributors",
       );
 
     my $keyhash = {};
@@ -115,48 +114,46 @@ sub parse {
     _trace('Found ' . scalar @$statements . ' statements to process');
 
     _trace('!!! starting statement processing loop');
-    foreach my $s (@$statements) {
-        my $debug_str = "Statement: " . $s->class;
+    foreach my $stmt (@$statements) {
+        my $debug_str = "Statement: " . $stmt->class;
 
-        my @tokens = $s->tokens();
+        my @tokens = $stmt->tokens;
         $debug_str .= " Contains " . scalar(@tokens) . " tokens";
 
-        my @sig = grep { $_->significant } @tokens;
-        $debug_str .= " Of which " . scalar(@sig) . " are significant";
+        my @significant = grep { $_->significant } @tokens;
+        $debug_str .= " Of which " . scalar(@significant) . " are significant";
 
         _trace($debug_str);
 
-        my $start_hash = 0;
-        my $start_ver  = 0;
+        my $collect_hash_tokens     = 0;
+        my $collect_version_tokens  = 0;
 
-        my $i = 0;
         _trace('entering significant token capture loop');
-        foreach my $t (@sig) {
-            $i++;
-            _trace("Token: " . $t->class . " : " . $t->content);
+        foreach my $token (@significant) {
+            _trace("Token: " . $token->class . ': ' . $token->content);
 
-            if ($t->class =~ m/Symbol/ and $t->content =~ m/\%IRSSI/) {
-                $start_hash = 1;
+            if (is_IRSSI_start_symbol($token)) {
+                $collect_hash_tokens = 1;
                 _trace("### starting HASH here");
             }
 
-            if ($start_hash) {
-                push @hash_buf, $t;
+            if ($collect_hash_tokens) {
+                push @hash_buf, $token;
             }
 
-            if ($t->class =~ m/Symbol/ and $t->content =~ m/\$VERSION/) {
-                $start_ver = 1;
+            if (is_VERSION_start_symbol($token)) {
+                $collect_version_tokens = 1;
                 _trace("**Starting version buffering here");
             }
 
-            if ($start_ver) {
-                push @ver_buf, $t;
+            if ($collect_version_tokens) {
+                push @ver_buf, $token;
             }
         }
         _trace('finished significant token capture loop');
 
-        # minimum of '$VERSION, =, <value>'
-        if (@ver_buf >= 3) {
+        # minimum of '$VERSION, =, <value>, ;' = 4 tokens.
+        if (@ver_buf > 3) {
 
             _debug("Going to parse version");
             _info("version buffer: '" .
@@ -172,17 +169,18 @@ sub parse {
             }
             @ver_buf = ();
         }
+        if (@hash_buf > 3) {
+            _debug("Going to parse metahash");
+            _info("buffer: '" .
+                  join(" _ ", map { $_->content } @hash_buf) . "'");
+
+            $return_value = $self->process_irssi_buffer(\@hash_buf);
+            @hash_buf = ();
+        }
+
     }
+
     _trace('!!! finished statement processing loop');
-
-
-    if (scalar @hash_buf) {
-        #  say "Our IRSSI buffer contains: ";
-        #  say join(", ", map { $_->content } @hash_buf);
-        my $irssi = $self->process_irssi_buffer(@hash_buf);
-        $self->_set_metadata($irssi);
-        $return_value = 1;
-    }
 
     _info("version set to: " . $self->version);
     _info("parse() complete. Returning $return_value");
@@ -193,66 +191,71 @@ sub process_version_buffer {
     my ($self, $buffer) = @_;
 
     my $probable_version;
+    # TODO: worth making some sort of enum-ish type for the states?
+    # would aid clarity, I suppose.
     my $state = 0;
     my $score = 0;
 
-    foreach my $tok (@$buffer) {
-        if ($tok->class =~ m/Symbol/ && $tok->content =~ m/VERSION/) {
-            $state = 1;
-            _trace("seen VERSION, moving to state 1");
-            next;
-        }
+    while(my $token = shift(@$buffer)) {
+        my $class = $token->class;
+        my $content = $token->content;
 
-        if ($state == 1 and
-            $tok->class =~ m/Operator/ and
-            $tok->content =~ m/=/) {
-            _trace("seen =, moving to state 2");
+        given ($state) {
 
-            $state = 2;
-            next;
-        }
-
-        if ($state == 2) {
-            _trace("In state 2, token content: " . $tok->content);
-            if ($probable_version = is_quoted_content($tok)) {
-                _debug("got quoted content: $probable_version");
-                $score = 1;
-                $state = 3;
-                next;
-            } elsif ($probable_version = is_number($tok)) {
-                _debug("got quoted content: $probable_version");
-                $score = 2;
-                $state = 3;
-                next;
-            } else {
-                _info("** failed parse");
-                $state = 0;
-                last;
+            when (0) {
+                if ($class =~ m/Symbol/ && $content =~ m/VERSION/) {
+                    $state = 1;
+                    _trace("seen VERSION, moving to state 1");
+                }
             }
-        }
-
-        if ($state == 3) {
-
-            _trace("In state 3, type: "
-                   . $tok->class . " content: " . $tok->content);
-
-            # TODO: I suppose it could not end with a semi-colon...?
-            if (is_structure_semicolon($tok) && $score > 0) {
-
-                my $line_num = $tok->line_number;
-                _info("Probable Version Number: $probable_version "
-                      . "(score: $score) on line: $line_num");
+            when (1) {
+                if ($class =~ m/Operator/ and $content =~ m/=/) {
+                    _trace("seen =, moving to state 2");
+                    $state = 2;
+                }
             }
+            when (2) {
 
-            $state = 0;
+                _trace("In state 2, token content: " . $content);
+
+                if ($probable_version = is_quoted_content($token)) {
+                    _debug("got quoted content: $probable_version");
+                    $state = 3;
+
+                } elsif ($probable_version = is_number($token)) {
+                    _debug("got quoted content: $probable_version");
+                    $state = 3;
+
+                } else {
+                    _info("** failed parse");
+                    $state = 0;
+                    last;
+                }
+            }
+            when (3) {
+
+                _trace("In state 3, type: "
+                       . $token->class . " content: " . $content);
+
+                # TODO: I suppose it could not end with a semi-colon...?
+                if (is_structure_semicolon($token)) {
+                    $state = 4;
+                    my $line_num = $token->line_number;
+                    _info("Probable Version Number: $probable_version "
+                          . "(score: $score) on line: $line_num");
+                    last;
+                }
+            }
+            default { $state = 0; }
         }
     }
 
-    if (defined $probable_version) {
+    if (defined $probable_version and $state == 4) {
+
         # TODO: might want to think about something like this
         # re: line_num as a sanity check.
-
         # $version = $ver if defined($line) and $line < 50;
+
         my $version = $probable_version;
 
         # TODO: quoted_content should handle this already?
@@ -329,7 +332,7 @@ sub is_structure_semicolon {
 sub is_unquoted_word {          # only hash keys are unquoted here.
     my ($token) = @_;
     return ($token->class eq 'PPI::Token::Word')
-                                  ? $token->content()
+                                  ? $token->content
                                   : ();
 }
 
@@ -337,7 +340,7 @@ sub is_quoted_content {
     my ($token) = @_;
     if ($token->class =~ m/^PPI::Token::Quote::(Double|Single)/) {
         my $type = ($1 eq 'Double') ? '"' : "'";
-        my $content = $token->content();
+        my $content = $token->content;
         $content =~ s/^$type//; $content =~ s/$type$//;
         _trace("is_quoted_content(): Content '$content'");
         return $content;
@@ -352,101 +355,134 @@ sub is_IRSSI_start_symbol {
             ($token->content =~ m/\%IRSSI/));
 }
 
+sub is_VERSION_start_symbol {
+    my ($token) = @_;
+    return (($token->class   =~ m/Symbol/) and
+            ($token->content =~ m/\$VERSION/));
+}
+
 sub is_valid_info_hashkey {
     my ($self, $token) = @_;
     return $self->_is_keyword($token->content);
 }
 
 sub process_irssi_buffer {
-    my ($self, @buf) = @_;
-    no warnings 'uninitialized';
+    my ($self, $buffer) = @_;
+    #no warnings 'uninitialized';
+    _trace('entering process_irssi_buffer()');
+    # results accumulator.
     my $hash  = {};
-    my $mode  = 0;
-    my $intro = 0;
+
+    # state variables
+    my $state    = 0;
+    my $preamble = 0;
+
+
     my ($key, $value);
     my $concat_next = 0;
     my $z;
-    while (my $tok = shift(@buf)) {
-        #say "Token: " . $tok->class . " Content: " . $tok->content;
-        #say "** Mode: $mode, intro: $intro, $key => $value ";
 
-        if ($intro < 3) {
-            if (is_IRSSI_start_symbol($tok) and $intro == 0) {
-                $intro = 1;
-                #say "Seen Start, Setting intro to 1";
-                next;
-            }
-            if (is_assign($tok) and $intro == 1) {
-                $intro = 2;
-                #say "Seen Assign, Setting intro to 2";
-                next;
-            }
+    while (my $token = shift(@$buffer)) {
+        _info("Token: " . $token->class . " Content: " . $token->content);
+        #_info("** Mode: $state, intro: $intro, $key => $value ");
 
-            if (is_structure_start($tok) and $intro == 2) {
-                $intro = 3;
-                #say "Seen Structure Start, Setting intro to 3";
+        if ($preamble < 3) {
+            _trace('in preamble');
+            given ($preamble) {
+                when (0) {
+                    if (is_IRSSI_start_symbol($token)) {
+                        $preamble = 1;
+                        _debug("Seen Start, Setting preamble to 1");
+                        next;
+                    }
+                }
+                when (1) {
+                    if (is_assign($token)) {
+                        $preamble = 2;
+                        _debug("Seen Assign, Setting preamble to 2");
+                        next;
+                    }
+                }
+                when (2) {
+                    if (is_structure_start($token)) {
+                        $preamble = 3;
+                        _debug("Seen Structure Start, Setting premable to 3");
 
-                next;
+                        next;
+                    }
+                }
             }
         }
-        # #say "Token: " . $tok->class . " Content: " . $tok->content;
-        # #say "** Mode: $mode, intro: $intro, $key => $value ";
+        _trace('past preamble');
+
+        # _info("Token: " . $token->class . " Content: " . $token->content);
+        # _info("** Mode: $state, intro: $intro, $key => $value ");
 
         # TODO:
         # need to check if anyone has quoted their first words, or
         # used commas rather than fat-arrows for key/val separation.
+        given ($state) {
+            when (0) {
+                if (is_unquoted_word($token) and
+                    $self->is_valid_info_hashkey($token)) {
+                    $key = $token->content;
 
-        if ($mode == 0 and is_unquoted_word($tok) and
-            $self->is_valid_info_hashkey($tok)) {
-            $key = $tok->content;
-            #say "Word content is good, key=$key. Mode set to 1";
-            $mode = 1;
-            next;
-        }
-
-        if ($mode == 1 and is_fat_arrow($tok)) {
-            #say "Mode 1, Fat Arrow Delim";
-            $mode = 2;
-            next;
-        }
-
-        if ($mode == 2 and ($z = is_quoted_content($tok))) {
-            #say "Mode 2, Read quoted content";
-            if ($concat_next) {
-                $value = $value . $z;
-                $concat_next = 0;
-            } else {
-                $value = $z;
+                    _debug("Word content is good, key=$key. Mode set to 1");
+                    $state = 1;
+                    next;
+                }
             }
-            $mode = 3;
-            next;
-        }
+            when (1) {
 
-        if ($mode == 3 and is_concat($tok)) {
-            $concat_next = 1;
-            $mode = 2;
-            #say "Concat pending";
-            next;
-        }
+                if (is_fat_arrow($token)) {
+                    _debug("Mode 1 -> 2, Fat Arrow Delim");
+                    $state = 2;
+                    next;
+                }
+            }
+            when (2) {
 
-        if ($mode == 3 and (is_comma($tok) or is_structure_end($tok))) {
-            #say "Mode 3, read comma, saving $key => $value";
+                if ($z = is_quoted_content($token)) {
+                    _debug("Mode 2 -> 3, Read quoted content");
+                    if ($concat_next) {
+                        $value = $value . $z;
+                        $concat_next = 0;
+                    } else {
+                        $value = $z;
+                    }
+                    $state = 3;
+                    next;
+                }
+            }
+            when (3) {
+                if (is_concat($token)) {
+                    $concat_next = 1;
+                    $state = 2;
+                    _debug("Concat pending");
+                    next;
+                }
 
-            $hash->{$key} = $value;
-            $key = undef; $value = undef;
-            $mode = 0;
-            next;
-        }
+                if ((is_comma($token) or is_structure_end($token))) {
+                    _debug("Mode 3, read comma, saving $key => $value");
 
-
-        if (is_structure_end($tok) and $mode != 0) {
-            #say "Something went wrong. Incomplete parsing: $mode/$key/$value";
-        } else {
-            last;
+                    $hash->{$key} = $value;
+                    $key = undef; $value = undef;
+                    $state = 0;
+                    next;
+                }
+            }
+            default {
+                if (is_structure_end($token) and $state != 0) {
+                    _warn("Something went wrong. " .
+                          "Incomplete parsing: $state/$key/$value");
+                } else {
+                    last;
+                }
+            }
         }
     }
-    return $hash;
-
+    my $ret = $self->_set_metadata($hash);
+    return scalar(keys %$ret);
 }
 
 
