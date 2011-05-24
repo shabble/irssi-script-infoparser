@@ -43,18 +43,6 @@ has '_hash_keywords'
                  },
      );
 
-has '_probable_versions'
-  => (
-      is      => 'rw',
-      isa     => 'ArrayRef',
-      traits  => [qw/Array/],
-      default => sub { [] },
-      handles => {
-                  add_to_probables => 'push',
-                 },
-
-     );
-
 has 'metadata'
   => (
       is      => 'ro',
@@ -118,14 +106,10 @@ sub parse {
     die "Cannot parse an incomplete document"
       unless $self->verify_document_complete;
 
-    # my $VERSION;
-    # my $IRSSI;
-
     my $return_value = 0;
-    my @ver_buf    = ();
-    my @hash_buf   = ();
+    my @ver_buf;
+    my @hash_buf;
 
-    $self->_probable_versions([]);
 
     my $statements = $doc->find('PPI::Statement');
     _trace('Found ' . scalar @$statements . ' statements to process');
@@ -170,22 +154,27 @@ sub parse {
             }
         }
         _trace('finished significant token capture loop');
+
+        # minimum of '$VERSION, =, <value>'
+        if (@ver_buf >= 3) {
+
+            _debug("Going to parse version");
+            _info("version buffer: '" .
+                  join(" _ ", map { $_->content } @ver_buf) . "'");
+
+            my $got_version = $self->process_version_buffer(\@ver_buf);
+
+            if ($got_version) {
+                $return_value = 1;
+                _info("*** Version returned: $got_version");
+            } else {
+                _warn("*** version parsing failed");
+            }
+            @ver_buf = ();
+        }
     }
     _trace('!!! finished statement processing loop');
 
-    if (@ver_buf > 3) {
-        _info("version buffer: '" .
-              join(" _ ", map { $_->content } @ver_buf) . "'");
-        my $version = $self->process_version_buffer(@ver_buf);
-        if (defined $version) {
-            $return_value = 1;
-            _info("*** Version retured: $version");
-            $self->_set_version($version);
-            @ver_buf = ();
-        } else {
-            _warn("*** version parsing failed");
-        }
-    }
 
     if (scalar @hash_buf) {
         #  say "Our IRSSI buffer contains: ";
@@ -201,13 +190,13 @@ sub parse {
 }
 
 sub process_version_buffer {
-    my ($self, @buf) = @_;
+    my ($self, $buffer) = @_;
 
     my $probable_version;
     my $state = 0;
     my $score = 0;
 
-    foreach my $tok (@buf) {
+    foreach my $tok (@$buffer) {
         if ($tok->class =~ m/Symbol/ && $tok->content =~ m/VERSION/) {
             $state = 1;
             _trace("seen VERSION, moving to state 1");
@@ -247,39 +236,37 @@ sub process_version_buffer {
             _trace("In state 3, type: "
                    . $tok->class . " content: " . $tok->content);
 
+            # TODO: I suppose it could not end with a semi-colon...?
             if (is_structure_semicolon($tok) && $score > 0) {
+
                 my $line_num = $tok->line_number;
                 _info("Probable Version Number: $probable_version "
                       . "(score: $score) on line: $line_num");
-                $self->add_to_probables([$probable_version,
-                                         $score, $line_num]);
             }
 
             $state = 0;
         }
     }
 
-    # sort by score;
-    my @tmp = sort { $b->[1] <=> $a->[1] } @{ $self->_probable_versions };
+    if (defined $probable_version) {
+        # TODO: might want to think about something like this
+        # re: line_num as a sanity check.
 
-    _info("*** Probables: " . Dumper(\@tmp));
-
-    if (@tmp) {
-        my ($ver, $s, $line) = @{$tmp[0]};
-
-        my $version = '';
-        $version = $ver if defined($line) and $line < 50;
+        # $version = $ver if defined($line) and $line < 50;
+        my $version = $probable_version;
 
         # TODO: quoted_content should handle this already?
         $version =~ s/^['"]//;
         $version =~ s/['"]$//;
 
         _debug("Extracted VERSION: $version");
-        return $version;
+        $self->_set_version($version);
+
+        return 1;
     }
 
     _warn('process_version_buffer(): returning false');
-    return;
+    return 0;
 }
 
 sub is_number {
