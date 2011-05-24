@@ -57,6 +57,28 @@ foreach my $file (glob("$samples_dir/set-2/*.pl")) {
     dump_logs() unless $ret;
 }
 
+#rerun set-2 but without ->parse, to see if the autoparse works.
+
+note('testing autoparse');
+
+foreach my $file (glob("$samples_dir/set-2/*.pl")) {
+    $log->clear;
+
+    my $f = [File::Spec->splitpath($file)]->[2];
+
+    $correct = $truth_data->{'set-2'}->{$f};
+    isnt($correct, undef, $f . ': truth value is valid');
+
+    my $obj = obj($file);
+
+    isnt($obj->version, 'UNKNOWN', $f . ': got a value for $VERSION');
+    my $ret =
+    is  ($obj->version, $correct,  $f . ': got correct value for $VERSION');
+    $tests += 3;
+    dump_logs() unless $ret;
+}
+
+
 TODO: {
     local $TODO = "Need to eval these for proper results";
     # foreach my $file (glob("$samples_dir/set-3/*.pl")) {

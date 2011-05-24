@@ -101,6 +101,71 @@ foreach my $filepath (glob("$samples_dir/set-2/*.pl")) {
     dump_logs() unless $ok;
 }
 
+# rerun for autoparse.
+note('testing autoparse for metadata');
+
+foreach my $filepath (glob("$samples_dir/set-2/*.pl")) {
+    $log->clear;
+
+    my $file = [File::Spec->splitpath($filepath)]->[2];
+    my $ok = 1;
+
+    $correct = $truth_data->{'set-2'}->{$file};
+    isnt  ($correct, undef,  $file . ': truth value is valid');
+    isa_ok($correct, 'HASH', $file . ': truth value is hashref');
+
+    my $obj = obj($filepath, 1);
+
+    my $meta = $obj->metadata;
+    my @keys = sort keys %$meta;
+
+    $ok = isa_ok($meta, 'HASH', $file . ': metadata is a hashref');
+    $ok = cmp_ok(@keys, '>', 0, $file . ': has some keys');
+
+    $ok = isa_ok($meta->{authors}, 'ARRAY', 'authors_split works');
+
+    my @correct_keys = sort keys %$correct;
+    $ok = eq_or_diff(\@keys, \@correct_keys, $file . ': keys match with expected');
+
+    $tests += 6;
+
+
+    foreach my $key (@keys) {
+        my $m_val = $meta->{$key};
+        my $c_val = $correct->{$key};
+        $ok = eq_or_diff($m_val, $c_val,
+                         "$file: values for key: '$key' are correct");
+        $tests++;
+    }
+
+    dump_logs() unless $ok;
+}
+
+
+
+# rerun for autoparse.
+note('testing autoparse for metadata delegates');
+
+foreach my $filepath (glob("$samples_dir/set-2/*.pl")) {
+    $log->clear;
+
+    my $file = [File::Spec->splitpath($filepath)]->[2];
+    my $ok = 1;
+
+    $correct = $truth_data->{'set-2'}->{$file};
+    isnt  ($correct, undef,  $file . ': truth value is valid');
+    isa_ok($correct, 'HASH', $file . ': truth value is hashref');
+
+    my $obj = obj($filepath, 1);
+
+    my @keys = sort $obj->metadata_fields;
+    $ok = cmp_ok(@keys, '>', 0, $file . ': has some keys');
+
+    my @correct_keys = sort keys %$correct;
+    $ok = eq_or_diff(\@keys, \@correct_keys, $file . ': keys match with expected');
+
+    $tests += 4;
+}
 
 done_testing $tests;
 
