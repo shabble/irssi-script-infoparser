@@ -55,7 +55,7 @@ has 'file'
   => (
       is       => 'rw',
       isa      => 'Str',
-      required => 1,
+      #required => 1,
      );
 
 has '_ppi_doc'
@@ -139,6 +139,9 @@ sub _parse_unless_done {
 sub _load_ppi_doc {
     my ($self) = @_;
     my $file = $self->file;
+
+    die "No Filename provided" unless $file;
+
     my $doc = PPI::Document->new($file, readonly => 1);
 
     if (not defined $doc) {
@@ -165,6 +168,10 @@ sub _build_keyword_list {
        "modules", "sbitems", "bugs", "url_ion",     "note",
        "patch",   "original_authors","original_contact",
        "contributors",
+
+       # TODO: this is going to be an arrayref, so it'll need special
+       # handling.  Currently only in use in my scripts afaik.
+       # "requires",
       );
 
     my $keyhash = {};

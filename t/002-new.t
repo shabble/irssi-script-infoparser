@@ -1,7 +1,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 6;
+use Test::More tests => 7;
 use Irssi::Script::InfoParser;
 use FindBin qw/$RealBin/;
 use File::Spec;
@@ -12,8 +12,9 @@ $dir_name =~ s/\.t//;
 my $samples_dir = File::Spec->catdir($RealBin, '/samples/', $dir_name);
 #diag("name: $0, dir_name: $dir_name, samples dir: $samples_dir");
 
-
-dies_ok( sub { Irssi::Script::InfoParser->new; }, 'file required' );
+my $obj;
+lives_ok( sub { $obj = Irssi::Script::InfoParser->new; }, 'file not required' );
+dies_ok(sub { $obj->version }, 'cannot call accessors without file' );
 
 my $invalid_file = File::Spec->catfile($samples_dir, 'invalid.pl');
 my $invalid_obj  = Irssi::Script::InfoParser->new(file => $invalid_file);
